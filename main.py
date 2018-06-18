@@ -8,14 +8,17 @@ from urllib.request import URLError, urlopen
 
 
 
-
 # FINISH ARGPARSER ALL COMMANDS (ADD UPDATE FUNC)
 # args_parser init
-parser = argparse.ArgumentParser()
-#parser.add_argument('load', help='load page and urls to database')
-#parser.add_argument('get', help='get page info from database')
-parser.add_argument('url', help='url for crawling')
-#parser
+parser = argparse.ArgumentParser(prog='Crawler')
+subparsers = parser.add_subparsers(dest='subparse')
+# Parser for load data
+parser_a = subparsers.add_parser('load', help='load page and urls to database')
+parser_a.add_argument('url', help='url for crawling')
+# Parser for get data
+parser_b = subparsers.add_parser('get', help='get page info from database')
+parser_b.add_argument('url', help='url for loading data')
+parser_b.add_argument('-n', help='strings amount')
 args = parser.parse_args()
 
 
@@ -41,7 +44,7 @@ def runtime(func):
 
 # Main function for web crawler
 @runtime
-def crawler(url):
+def loader(url):
     # Catching page
     try:
         page = urlopen(url)
@@ -55,34 +58,37 @@ def crawler(url):
     # Database connection
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM urls WHERE url =? LIMIT 1", (url,))
+    cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
     result = cursor.fetchone()
-    if result is None or str(result[1]) != url:
+    if result is None or str(result[0]) != url:
         cursor.execute("INSERT INTO urls (url,title,html) VALUES (?,?,?)", (url, title, str(html)))
     else:
         print("Page already was loaded to database. Use main.py -get url command instead")
         return False
-    conn.commit()
-    conn.close()
+
 
     # Finish insertion to suburls database here
     # Looking for urls
     for link in html.find_all('a'):
         link = link.get('href')
         if link is not None and str(link) is not '/':
-            if re.match(regex,link) is not None:
-                pass
-                #subpage = urlopen(link)
-                #subpage = subpage.title
+            if re.match(regex, link) is not None:
+                try:
+                    subpage = urlopen(link)
+                except (URLError, ValueError):
+                    raise URLError('Invalid URL')
+
+                subpage = BeautifulSoup(page.read(), 'html.parser')
+                cursor.execute("INSERT INTO suburls (url_id,url,title) VALUES (?,?,?)", (cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,)).fetchone(), link, (BeautifulSoup.find(["title"]))))
             else:
                 pass
                 #print(url+link)
     #print(cursor.execute("SELECT id FROM urls u WHERE rowid > 0").fetchall())
-
+    conn.commit()
+    conn.close()
 
 if __name__ == "__main__":
-    crawler(args.url)
-    #if args.load:
-       # pass
-    #if args.get:
-       # pass
+    if args.subparse == 'get':
+        pass
+    if args.subparse == 'load':
+        loader(args.url)
