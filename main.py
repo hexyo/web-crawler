@@ -71,7 +71,7 @@ def loader(url):
     # Looking for urls
     for link in html.find_all('a'):
         link = link.get('href')
-        if link is not None and str(link) is not '/':
+        if link and str(link) is not '/':
             if re.match(regex, link) is not None:
                 try:
                     subpage = urlopen(link)
