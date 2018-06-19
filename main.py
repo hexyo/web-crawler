@@ -7,25 +7,29 @@ import re
 from urllib.request import URLError, urlopen
 
 
-
-# FINISH ARGPARSER ALL COMMANDS (ADD UPDATE FUNC)
-# args_parser init
+# ArgsParser initialise
 parser = argparse.ArgumentParser(prog='Crawler')
 subparsers = parser.add_subparsers(dest='subparse')
-# Parser for load data
+# ArgsParser for load data
 parser_a = subparsers.add_parser('load', help='load page and urls to database')
 parser_a.add_argument('url', help='url for crawling')
-# Parser for get data
+#  ArgsParser for get data
 parser_b = subparsers.add_parser('get', help='get page info from database')
 parser_b.add_argument('url', help='url for loading data')
 parser_b.add_argument('-n', help='strings amount')
+# ArgsParser for update data
+parser_c = subparsers.add_parser('update', help='update database content on existing page')
+parser_c.add_argument('url', help='url for loading data')
 args = parser.parse_args()
-
 
 # Regex for protocol check
 regex = re.compile(
     r'^(?:http|ftp)s?://'
 )
+
+# Database connection
+conn = sqlite3.connect('database.db')
+cursor = conn.cursor()
 
 
 # Decorator for execution time and memory usage counting
@@ -42,28 +46,31 @@ def runtime(func):
     return time_and_memory_count
 
 
-# Main function for web crawler
-@runtime
-def loader(url):
+def get_page(url):
     # Catching page
     try:
         page = urlopen(url)
     except (URLError, ValueError):
         raise URLError('Invalid URL')
-
+    # Page file parsing
     html = BeautifulSoup(page.read(), 'html.parser')
-    title = html.title.text
+    # Deleting all CSS and JS from page
     for script in html(["script", "style"]):
         script.extract()
-    # Database connection
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
+    return html
+
+
+# Main function for web crawler
+@runtime
+def loader(url):
+    html = get_page(url)
+    title = html.title.text
     cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
     result = cursor.fetchone()
     if result is None or str(result[0]) != url:
         cursor.execute("INSERT INTO urls (url,title,html) VALUES (?,?,?)", (url, title, str(html)))
     else:
-        print("Page already was loaded to database. Use main.py -get url command instead")
+        print("Page already was loaded to database. You can update it with 'main.py update url'")
         return False
 
 
@@ -78,17 +85,23 @@ def loader(url):
                 except (URLError, ValueError):
                     raise URLError('Invalid URL')
 
-                subpage = BeautifulSoup(page.read(), 'html.parser')
-                cursor.execute("INSERT INTO suburls (url_id,url,title) VALUES (?,?,?)", (cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,)).fetchone(), link, (BeautifulSoup.find(["title"]))))
+                subpage = BeautifulSoup(subpage.read(), 'html.parser')
+                cursor.execute("INSERT INTO suburls (url_id,url,title) VALUES (?,?,?)", (cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,)).fetchone(), link, (BeautifulSoup.find("title"))))
             else:
                 pass
-                #print(url+link)
-    #print(cursor.execute("SELECT id FROM urls u WHERE rowid > 0").fetchall())
-    conn.commit()
-    conn.close()
+                # print(url+link)
+    # print(cursor.execute("SELECT id FROM urls u WHERE rowid > 0").fetchall())
 
-if __name__ == "__main__":
+
+def main():
     if args.subparse == 'get':
         pass
     if args.subparse == 'load':
         loader(args.url)
+    # Commit and close database
+    conn.commit()
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()
