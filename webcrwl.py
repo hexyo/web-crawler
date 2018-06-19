@@ -44,6 +44,7 @@ def runtime(func):
     return time_and_memory_count
 
 
+# Getting page object for parser
 def get_page(url):
     # Catching page
     try:
@@ -100,15 +101,14 @@ def loader(url):
             cursor.execute("DELETE FROM suburls WHERE url_id = ?", url_id)
             loader(url)
             return False
-
         else:
+            print("Ok!")
             return False
     conn.commit()
     conn.close()
 
 
 # Get info from DB
-@runtime
 def get(url,count=1):
     cursor.execute("SELECT s.url,s.title FROM suburls s LEFT JOIN urls u ON u.id = s.url_id WHERE u.url = ? LIMIT ?",(url,count))
     result = cursor.fetchall()
@@ -121,12 +121,14 @@ def get(url,count=1):
 
 # Delete all from database
 def clear():
-    if input("Are you sure? \ny/n: ") == 'y':
+    if input("Are you sure want DELETE ALL DATA? \ny/n: ") == 'y':
         cursor.execute("DELETE FROM urls")
         cursor.execute("DELETE FROM suburls")
         cursor.execute("DELETE FROM sqlite_sequence")
         conn.commit()
         print('Data was succesfully delete')
+    else:
+        print("Ok!")
     conn.close()
 
 
