@@ -19,9 +19,6 @@ parser_a.add_argument('url', help='url for crawling')
 parser_b = subparsers.add_parser('get', help='get page info from database')
 parser_b.add_argument('url', help='url for loading data')
 parser_b.add_argument('-n','--count', help='strings amount')
-# ArgsParser for update data
-parser_c = subparsers.add_parser('update', help='update database content on existing page')
-parser_c.add_argument('url', help='url for loading data')
 args = parser.parse_args()
 
 # Regex for protocol check
@@ -52,13 +49,10 @@ def get_page(url):
     # Catching page
     try:
         page = urlopen(url)
-    except (URLError,HTTPError, ValueError):
-        raise URLError('Invalid URL')
+    except (URLError,HTTPError, ValueError, AttributeError):
+        return False
     # Page file parsing
-    html = BeautifulSoup(page.read(), 'html.parser')
-    # Deleting all CSS and JS from page
-    for script in html(["script", "style"]):
-        script.extract()
+    html = BeautifulSoup(page.read(), 'lxml')
     return html
 
 
@@ -74,54 +68,62 @@ def links_insert(html):
 def loader(url):
     html = get_page(url)
     title = html.title.text
+    # Deleting all CSS and JS from page
+    for script in html(["script", "style"]):
+        script.extract()
+
     cursor.execute("SELECT url,id FROM urls WHERE url =? LIMIT 1", (url,))
     result = cursor.fetchone()
+    # If this URL wasn't loaded yet
     if result is None or str(result[0]) != url:
         cursor.execute("INSERT INTO urls (url,title,html) VALUES (?,?,?)", (url, title, str(html)))
         cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
         url_id = cursor.fetchone()
         counter = 0
-        for link in html.find_all('a'):
-            link = link.get('href')
+        # For each sublink
+        # Create list of sublinks
+        suburls_list = [link.get('href') for link in html.find_all('a') if link.get('href') is not None ]
+        for link in suburls_list:
             if link is not None and str(link) is not '/':
-                counter += 1
                 if re.match(regex,link) is not None:
-                    print("{} iteration. (Valid URL)".format(counter))
-                    suburl = link
-                    link = get_page(suburl)
-                    cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
-                                   (url_id[0],suburl, link.title.text,))
-                else:
-                    print("{} iteration. (Handmade URL)".format(counter))
-                    suburl = url+link
-                    link = get_page(suburl)
-                    cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
-                                   (url_id[0],suburl, link.title.text,))
-
-
-        print("Page was loaded successful")
-        # Finish insertion to suburls database here
-        # Looking for urls
-        ''' for link in html.find_all('a'):
-                link = link.get('href')
-                if link and str(link) is not '/':
-                    if re.match(regex, link) is not None:
-                        try:
-                            subpage = urlopen(link)
-                        except (URLError, ValueError):
-                            raise URLError('Invalid URL')
-
-                        subpage = BeautifulSoup(subpage.read(), 'html.parser')
-                        cursor.execute("INSERT INTO suburls (url_id,url,title) VALUES (?,?,?)", (cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,)).fetchone(), link, (BeautifulSoup.find("title"))))
-                    else:
-                        pass
-                        # print(url+link)
-            # print(cursor.execute("SELECT id FROM urls u WHERE rowid > 0").fetchall())'''
+                    if str(link).startswith('mailto') is True:
+                        suburls_list.remove(link)
+            else:
+                 link = url + link
+        # if link isn't bagged
+        print(suburls_list)
+        for link in suburls_list:
+            counter += 1
+            # and if link match url regex
+            suburl = link
+            print("{} iteration. ({})(Valid URL)".format(counter,suburl))
+            link = get_page(suburl)
+            if link is not False:
+                # insert to db
+                cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
+                            (url_id[0],suburl, link.title.text,))
+                # else made valid url and do same
+           # else:
+                #if str(link).startswith('mailto') is False:
+                    #suburl = url+link
+                    #print("{} iteration. ({})(Handmade URL)".format(counter, suburl))
+                    #link = get_page(suburl)
+                    #if link is not False:
+                       # cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
+                                # (url_id[0],suburl, link.title.text,))
     else:
-        print("Page already was loaded to database. You can update it with 'webcrwl.py update url'")
-        return False
-    conn.commit()
-    conn.close()
+        print("Page already was loaded to database. Wanna update it?'")
+        cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
+        url_id = cursor.fetchone()
+        answer = input('y/n: ')
+        if answer.lower() == 'y':
+            cursor.execute("DELETE FROM urls WHERE id = ? ",url_id)
+            cursor.execute("DELETE FROM suburls WHERE url_id = ?", url_id)
+            loader(url)
+
+        else:
+            return False
+
 
 @runtime
 def get(url,count=1):
@@ -138,9 +140,8 @@ def main():
         get(args.url,args.count)
     if args.subparse == 'load':
         loader(args.url)
-
-    # Commit and close database
-
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":
