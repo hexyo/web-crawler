@@ -1,25 +1,12 @@
 import argparse
-from urllib.error import HTTPError
-
 from bs4 import BeautifulSoup
-import time
 from memory_profiler import memory_usage
-import sqlite3
 import re
+import time
+import sqlite3
+import sys
 from urllib.request import URLError, urlopen
-
-
-# ArgsParser initialise
-parser = argparse.ArgumentParser(prog='Crawler')
-subparsers = parser.add_subparsers(dest='subparse')
-# ArgsParser for load data
-parser_a = subparsers.add_parser('load', help='load page and urls to database')
-parser_a.add_argument('url', help='url for crawling')
-#  ArgsParser for get data
-parser_b = subparsers.add_parser('get', help='get page info from database')
-parser_b.add_argument('url', help='url for loading data')
-parser_b.add_argument('-n','--count', help='strings amount')
-args = parser.parse_args()
+from urllib.error import HTTPError
 
 # Regex for protocol check
 regex = re.compile(
@@ -29,6 +16,18 @@ regex = re.compile(
 # Database connection
 conn = sqlite3.connect('database.db')
 cursor = conn.cursor()
+
+
+# Progress bar
+def progress(count, total, status=''):
+    bar_len = 60
+    filled_len = int(round(bar_len * count / float(total)))
+
+    percents = round(100.0 * count / float(total), 1)
+    bar = 'x' * filled_len + '.' * (bar_len - filled_len)
+    current = '({} of {})'.format(count,total)
+    sys.stdout.write('[%s] %s%s ...%s%s\r' % (bar, percents, '%',status,current))
+    sys.stdout.flush()
 
 
 # Decorator for execution time and memory usage counting
@@ -49,21 +48,14 @@ def get_page(url):
     # Catching page
     try:
         page = urlopen(url)
-    except (URLError,HTTPError, ValueError, AttributeError):
+    except (URLError, HTTPError, ValueError, AttributeError):
         return False
-    # Page file parsing
+        # Page file parsing
     html = BeautifulSoup(page.read(), 'lxml')
     return html
 
 
-def links_insert(html):
-   for link in html.find_all('a'):
-        link = link.get('href')
-        if link != 'None' and str(link) is not '/':
-            return None
-
-
-# Main function for web crawler
+# Pages loader function
 @runtime
 def loader(url):
     html = get_page(url)
@@ -80,37 +72,24 @@ def loader(url):
         cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
         url_id = cursor.fetchone()
         counter = 0
-        # For each sublink
         # Create list of sublinks
-        suburls_list = [link.get('href') for link in html.find_all('a') if link.get('href') is not None ]
+        suburls_list = [link.get('href') for link in html.find_all('a') if link.get('href') is not None and str(link).startswith('/') is False
+                        and str(link).endswith(('.jpg','.pdf','.docx','.jpeg')) is False and str(link).startswith(('mailto','tel:')) is False and str(link)!='#']
         for link in suburls_list:
-            if link is not None and str(link) is not '/':
-                if re.match(regex,link) is not None:
-                    if str(link).startswith('mailto') is True:
-                        suburls_list.remove(link)
-            else:
-                 link = url + link
-        # if link isn't bagged
-        print(suburls_list)
-        for link in suburls_list:
-            counter += 1
+            progress(counter,len(suburls_list), status='Loading all dependent pages')
             # and if link match url regex
             suburl = link
-            print("{} iteration. ({})(Valid URL)".format(counter,suburl))
             link = get_page(suburl)
-            if link is not False:
+            if link is not None and link is not False:
                 # insert to db
+                try:
+                    sub_title = link.find("title").text
+                except AttributeError as e:
+                    pass
                 cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
-                            (url_id[0],suburl, link.title.text,))
-                # else made valid url and do same
-           # else:
-                #if str(link).startswith('mailto') is False:
-                    #suburl = url+link
-                    #print("{} iteration. ({})(Handmade URL)".format(counter, suburl))
-                    #link = get_page(suburl)
-                    #if link is not False:
-                       # cursor.execute("INSERT OR IGNORE INTO suburls  (url_id,url,title) VALUES (?,?,?)",
-                                # (url_id[0],suburl, link.title.text,))
+                            (url_id[0],suburl, sub_title,))
+            counter += 1
+        print("\n Success! Now you can use `get url -n x`")
     else:
         print("Page already was loaded to database. Wanna update it?'")
         cursor.execute("SELECT id FROM urls WHERE url =? LIMIT 1", (url,))
@@ -120,11 +99,15 @@ def loader(url):
             cursor.execute("DELETE FROM urls WHERE id = ? ",url_id)
             cursor.execute("DELETE FROM suburls WHERE url_id = ?", url_id)
             loader(url)
+            return False
 
         else:
             return False
+    conn.commit()
+    conn.close()
 
 
+# Get info from DB
 @runtime
 def get(url,count=1):
     cursor.execute("SELECT s.url,s.title FROM suburls s LEFT JOIN urls u ON u.id = s.url_id WHERE u.url = ? LIMIT ?",(url,count))
@@ -133,16 +116,19 @@ def get(url,count=1):
         print("This url wasn't load yet or sublinks wasn't found. \nTry webcrwl.py load `url` ")
     for row in result:
         print('{}: "{}"'.format(row[0],row[1]))
-
-
-def main():
-    if args.subparse == 'get':
-        get(args.url,args.count)
-    if args.subparse == 'load':
-        loader(args.url)
-    conn.commit()
     conn.close()
 
 
-if __name__ == "__main__":
-    main()
+# Delete all from database
+def clear():
+    if input("Are you sure? \ny/n: ") == 'y':
+        cursor.execute("DELETE FROM urls")
+        cursor.execute("DELETE FROM suburls")
+        cursor.execute("DELETE FROM sqlite_sequence")
+        conn.commit()
+        print('Data was succesfully delete')
+    conn.close()
+
+
+
+
